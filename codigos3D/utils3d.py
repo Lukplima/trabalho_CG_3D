@@ -131,6 +131,15 @@ class Player(Objeto):
         self.velocidade = 3.0
         self.velocidade_giro = 2.0
 
+    def matriz_modelo(self):
+        # Orientacao: primeiro a direcao horizontal, depois a inclinacao local.
+        matriz = glm.mat4(1.0)
+        matriz = glm.translate(matriz, self.posicao)
+        matriz = glm.rotate(matriz, self.rotacao.y, glm.vec3(0, 1, 0))
+        matriz = glm.rotate(matriz, self.rotacao.x, glm.vec3(1, 0, 0))
+        matriz = glm.rotate(matriz, self.rotacao.z, glm.vec3(0, 0, 1))
+        return glm.scale(matriz, self.escala)
+
     def atualizar(self, delta_tempo):
         self.dt = delta_tempo
 
