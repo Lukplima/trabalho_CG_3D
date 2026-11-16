@@ -1,9 +1,3 @@
-# CONTROLES:
-# ESC - Fechar
-# V - Ativar/desativar V-Sync
-# Mouse esquerdo + arrastar - Orbitar a camera
-# Roda do mouse - Aproximar/afastar a camera
-# Executar: python main.py (abre uma janela para escolher o modelo OFF)
 
 import sys
 import math
@@ -36,11 +30,13 @@ def carregar_programa(ctx):
         fragment_shader=(SHADERS / "phong.frag").read_text(encoding="utf-8"),
     )
 
+
 def carregar_programa_textura(ctx):
     return ctx.program(
         vertex_shader=(SHADERS / "textura.vert").read_text(encoding="utf-8"),
         fragment_shader=(SHADERS / "textura.frag").read_text(encoding="utf-8"),
     )
+
 
 def matriz_normal(modelo):
     return glm.transpose(glm.inverse(glm.mat3(modelo)))
@@ -77,36 +73,41 @@ def main():
     malha = Malha("mapa.off")
     programa = carregar_programa(ctx)
     programa_textura = carregar_programa_textura(ctx)
-    dados = malha.dados_gpu()
-    indices = malha.indices_gpu()
-    vbo = ctx.buffer(dados.tobytes())
-    ebo = ctx.buffer(indices.tobytes())
-    vao = ctx.vertex_array(
-        programa,
-        [(vbo, "3f 3f", "vPosition", "vNormal")],
-        index_buffer=ebo,
-    )
 
     camera = Camera(distancia=5.0)
     material = Material()
     luz = Luz()
+
     modelo = glm.scale(
-    malha.matriz_enquadramento(),
-    glm.vec3(60.0, 60.0, 60.0))
+        malha.matriz_enquadramento(),
+        glm.vec3(60.0, 60.0, 60.0)
+    )
+
     colisao_pista = ColisaoPista(malha, modelo)
+
     arrastando = False
     ultimo_cursor = None
 
-    #Objetos
+    import time
+
+    # OBJETOS
+    inicio = time.perf_counter()
     player = Player(ctx, programa_textura)
+    print(f"Player carregado em {time.perf_counter() - inicio:.2f}s")
+
+    inicio = time.perf_counter()
+    mapa = Mapa(ctx, programa_textura, modelo)
+    print(f"Árvores carregadas em {time.perf_counter() - inicio:.2f}s")
 
     player.mudar_escala((0.5, 0.5, 0.5))
     player.mudar_posicao((0.0, 0.4, 0.0))
+
     altura_chassi = 0.21  # Mantem o ajuste anterior das rodas
     distancia_frente = 0.38  # Pontos de amostragem no sentido do carro
     distancia_lateral = 0.26  # Pontos de amostragem entre os lados
     inclinacao_maxima = glm.radians(25.0)
     velocidade_suavizacao = 7.0
+
     contato_inicial = colisao_pista.consultar(player.posicao.x, player.posicao.z)
     if contato_inicial is not None:
         player.posicao.y = contato_inicial[0] + altura_chassi
@@ -180,9 +181,11 @@ def main():
             player.posicao.x, player.posicao.z,
             player.posicao.y - altura_chassi + 0.15
         )
+
         if contato is not None:
             altura_pista, normal_pista = contato
             player.posicao.y = altura_pista + altura_chassi
+
         # Se não há superfície, mantém a altura anterior (sem teleporte).
         # A orientação horizontal do carro permanece em rotacao.y.
         angulo = player.rotacao.y
@@ -201,28 +204,43 @@ def main():
             )
             return None if hit is None else hit[0]
 
-        altura_frente = altura_em(frente_x * distancia_frente,
-                                 frente_z * distancia_frente)
-        altura_tras = altura_em(-frente_x * distancia_frente,
-                               -frente_z * distancia_frente)
-        altura_direita = altura_em(direita_x * distancia_lateral,
-                                  direita_z * distancia_lateral)
-        altura_esquerda = altura_em(-direita_x * distancia_lateral,
-                                   -direita_z * distancia_lateral)
+        altura_frente = altura_em(
+            frente_x * distancia_frente,
+            frente_z * distancia_frente
+        )
+        altura_tras = altura_em(
+            -frente_x * distancia_frente,
+            -frente_z * distancia_frente
+        )
+        altura_direita = altura_em(
+            direita_x * distancia_lateral,
+            direita_z * distancia_lateral
+        )
+        altura_esquerda = altura_em(
+            -direita_x * distancia_lateral,
+            -direita_z * distancia_lateral
+        )
 
         # Angulos locais: X = subir/descer; Z = tombar para os lados.
         # Se faltarem pontos sob as rodas, retorna gradualmente ao plano.
         alvo_pitch = 0.0
         alvo_roll = 0.0
+
         if altura_frente is not None and altura_tras is not None:
-            alvo_pitch = math.atan2(altura_frente - altura_tras,
-                                    2.0 * distancia_frente)
+            alvo_pitch = math.atan2(
+                altura_frente - altura_tras,
+                2.0 * distancia_frente
+            )
+
         if altura_direita is not None and altura_esquerda is not None:
-            alvo_roll = math.atan2(altura_direita - altura_esquerda,
-                                   2.0 * distancia_lateral)
+            alvo_roll = math.atan2(
+                altura_direita - altura_esquerda,
+                2.0 * distancia_lateral
+            )
 
         alvo_pitch = max(-inclinacao_maxima, min(inclinacao_maxima, alvo_pitch))
         alvo_roll = max(-inclinacao_maxima, min(inclinacao_maxima, alvo_roll))
+
         fator = 1.0 - math.exp(-velocidade_suavizacao * dt)
         player.rotacao.x += (alvo_pitch - player.rotacao.x) * fator
         player.rotacao.z += (alvo_roll - player.rotacao.z) * fator
@@ -256,16 +274,8 @@ def main():
         enviar_matriz(programa, "u_visao", visao)
         enviar_matriz(programa, "u_projecao", projecao)
 
-        # RENDERIZA O MAPA
-        programa["u_modelo"].write(modelo.to_bytes())
-
-        enviar_matriz(
-            programa,
-            "u_normal",
-            matriz_normal(modelo)
-        )
-
-        vao.render(mode=moderngl.TRIANGLES)
+        # RENDERIZA AS mapa
+        mapa.desenhar(visao, projecao)
 
         # RENDERIZA O JOGADOR
         player.desenhar(visao, projecao)
@@ -283,12 +293,12 @@ def main():
         glfw.poll_events()
 
     player.liberar()
+    mapa.liberar()
 
-    vao.release()
-    vbo.release()
-    ebo.release()
     programa.release()
+    programa_textura.release()
     glfw.terminate()
+
     print("Execucao finalizada.")
 
 

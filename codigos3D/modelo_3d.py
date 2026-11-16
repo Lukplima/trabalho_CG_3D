@@ -2,14 +2,28 @@
 import numpy as np
 from PIL import Image
 from pathlib import Path
+import time
 
 #PEGA OFF; OBJ e PNG para gerar o modelo (Usado no Player)
 class Modelo3D:
-    def __init__(self, arquivo_off, arquivo_obj, arquivo_png, normalizar=True, precisao=5):
+    
+    def __init__(self, arquivo_off, arquivo_obj, arquivo_png,
+             normalizar=True, precisao=5):
+
+        inicio = time.perf_counter()
 
         self.precisao = precisao
 
-        self.vertices_originais, self.faces_originais = self.ler_off(arquivo_off)
+        self.vertices_originais, self.faces_originais = self.ler_off(
+            arquivo_off
+        )
+
+        print(
+            "OFF carregado:",
+            len(self.vertices_originais), "vértices;",
+            len(self.faces_originais), "faces;",
+            round(time.perf_counter() - inicio, 3), "segundos"
+        )
 
         self.vertices_obj = []
         self.uvs_obj = []
@@ -25,19 +39,47 @@ class Modelo3D:
         self.textura_dados = None
         self.textura_tamanho = None
 
+        etapa = time.perf_counter()
         self.carregar_obj(arquivo_obj)
 
+        print(
+            "OBJ carregado:",
+            len(self.vertices_obj), "vértices;",
+            len(self.faces_obj), "faces;",
+            round(time.perf_counter() - etapa, 3), "segundos"
+        )
+
+        etapa = time.perf_counter()
         self.processar_geometria()
 
-        if normalizar:
-            self.normalizar()
+        print(
+            "Geometria processada:",
+            len(self.vertices), "vértices renderizados;",
+            round(time.perf_counter() - etapa, 3), "segundos"
+        )
 
+        if normalizar:
+            etapa = time.perf_counter()
+            self.normalizar()
+            print(
+                "Normalização:",
+                round(time.perf_counter() - etapa, 3), "segundos"
+            )
+
+        etapa = time.perf_counter()
         self.carregar_png(arquivo_png)
 
-        print("Modelo carregado!")
-        print("Vértices renderizados:", len(self.vertices))
-        print("Triângulos:", len(self.indices) // 3)
-        print("Tamanho da textura:", self.textura_tamanho)
+        print(
+            "PNG carregado:",
+            self.textura_tamanho,
+            round(time.perf_counter() - etapa, 3), "segundos"
+        )
+
+        print(
+            "Modelo carregado em:",
+            round(time.perf_counter() - inicio, 3), "segundos"
+        )
+
 
 
     # LEITURA OFF
@@ -144,8 +186,11 @@ class Modelo3D:
         return tuple(sorted(self.chave_vertice(v) for v in vertices))
 
     def processar_geometria(self):
-        # Relaciona cada face OBJ com seus respectivos UVs.
+
+        # RELACIONA AS FACES DO OBJ COM SEUS UVs
+
         mapa_faces = {}
+
         for face in self.faces_obj:
 
             posicoes = [
@@ -155,24 +200,27 @@ class Modelo3D:
 
             chave = self.chave_face(posicoes)
 
-            mapa_faces[chave] = {
-                self.chave_vertice(self.vertices_obj[indice_v]):
-                    self.uvs_obj[indice_uv]
-                for indice_v, indice_uv in face
-            }
+            mapa_uv = {}
 
-        # Associa os UVs às faces do OFF.
+            for indice_v, indice_uv in face:
+                chave_vertice = self.chave_vertice(
+                    self.vertices_obj[indice_v]
+                )
+
+                mapa_uv[chave_vertice] = self.uvs_obj[indice_uv]
+
+            mapa_faces[chave] = mapa_uv
+
+        # ASSOCIA OS UVs ÀS FACES DO OFF
 
         faces_com_uv = []
 
         for numero, face in enumerate(self.faces_originais):
 
             posicoes = self.vertices_originais[face]
-
             chave = self.chave_face(posicoes)
 
             if chave not in mapa_faces:
-
                 raise ValueError(
                     f"Face {numero} do OFF não encontrada no OBJ. "
                     "Verifique se os dois arquivos possuem "
@@ -210,8 +258,6 @@ class Modelo3D:
         triangulos = []
 
         for face, coordenadas in faces_com_uv:
-
-            # Triangulação em leque.
 
             for i in range(1, len(face) - 1):
 
@@ -294,7 +340,6 @@ class Modelo3D:
         )
 
         self.atualizar_dados_gpu()
-
 
     # NORMALIZAÇÃO
 
