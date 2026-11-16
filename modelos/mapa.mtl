@@ -10,7 +10,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/baloon.png
+map_Kd ../imagens/baloon.png
 
 newmtl banners
 Ns 20.000006
@@ -20,7 +20,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/banners.png
+map_Kd ../imagens/banners.png
 
 newmtl barriers
 Ns 20.000006
@@ -30,7 +30,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/barriers.png
+map_Kd ../imagens/barriers.png
 
 newmtl fence_metal
 Ns 20.000006
@@ -40,7 +40,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/metal_fence.png
+map_Kd ../imagens/metal_fence.png
 
 newmtl garages
 Ns 20.000006
@@ -50,7 +50,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/garages.png
+map_Kd ../imagens/garages.png
 
 newmtl grass_1
 Ns 20.000006
@@ -60,7 +60,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/grass_1.png
+map_Kd ../imagens/grass_1.png
 
 newmtl grass_2
 Ns 20.000006
@@ -70,7 +70,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/grass_2.png
+map_Kd ../imagens/grass_2.png
 
 newmtl gravel
 Ns 20.000006
@@ -80,7 +80,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/gravel.png
+map_Kd ../imagens/gravel.png
 
 newmtl road
 Ns 20.000006
@@ -90,7 +90,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/road.png
+map_Kd ../imagens/road.png
 
 newmtl rock
 Ns 20.000006
@@ -100,7 +100,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/rock.png
+map_Kd ../imagens/rock.png
 
 newmtl startlights
 Ns 20.000006
@@ -120,7 +120,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/trees.png
+map_Kd ../imagens/trees.png
 
 newmtl tyres
 Ns 20.000006
@@ -130,7 +130,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd C:/Users/lucas/Downloads/Carace/imagens/tyres.png
+map_Kd ../imagens/tyres.png
 
 newmtl white_line
 Ns 20.000006
