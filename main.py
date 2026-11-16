@@ -70,7 +70,7 @@ def main():
     ctx.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
     ctx.front_face = "ccw"
 
-    malha = Malha("mapa.off")
+    malha = Malha(PASTA / "mapa.off")
     programa = carregar_programa(ctx)
     programa_textura = carregar_programa_textura(ctx)
 
@@ -98,6 +98,50 @@ def main():
     inicio = time.perf_counter()
     mapa = Mapa(ctx, programa_textura, modelo)
     print(f"Árvores carregadas em {time.perf_counter() - inicio:.2f}s")
+
+    # ESTRELAS: mesma geometria OBJ e dimensoes extraidas do OFF.
+    malha_estrela = Malha(PASTA / "modelos" / "estrela.off")
+    limites_estrela = np.ptp(malha_estrela.vertices, axis=0)
+    altura_desejada_estrela = 0.75
+    escala_estrela = altura_desejada_estrela / float(limites_estrela[1])
+    folga_estrela = 0.20
+    y_min_estrela = float(malha_estrela.vertices[:, 1].min())
+
+    # Posicoes iniciais de teste: ajuste as coordenadas que nao cairem no asfalto.
+    # Primeira estrela = posicao que voce ja utilizava na largada.
+    posicoes_estrelas = [
+        (17.0, -4.0),
+        (35.0, -4.0),
+        (12.0, 20.0),
+        (2.0, 27.0),
+        (-12.0, 18.0),
+        (-18.0, 5.0),
+        (-10.0, -12.0),
+        (4.0, -18.0),
+        (15.0, -12.0),
+    ]
+
+    estrelas = []
+    for x, z in posicoes_estrelas:
+        contato_estrela = colisao_pista.consultar(x, z)
+        if contato_estrela is None:
+            print(f"AVISO: nenhuma superficie sob a estrela em ({x:.2f}, {z:.2f}); ignorada.")
+            continue
+
+        altura_solo = contato_estrela[0]
+        y = altura_solo + folga_estrela - y_min_estrela * escala_estrela
+        estrela = ObjetoOBJ(ctx, programa_textura, MODELOS / "estrela.obj")
+        estrela.mudar_escala((escala_estrela,) * 3)
+        estrela.mudar_posicao((x, y, z))
+        estrela.rotacao.y = glm.radians(90.0)
+        estrela.base_y = y
+        estrelas.append(estrela)
+        print(f"Estrela posicionada em ({x:.2f}, {y:.2f}, {z:.2f})")
+
+    tempo_estrela = 0.0
+    velocidade_giro_estrela = glm.radians(90.0)
+    amplitude_flutuacao = 0.12
+    frequencia_flutuacao = 2.0
 
     player.mudar_escala((0.5, 0.5, 0.5))
     player.mudar_posicao((0.0, 0.4, 0.0))
@@ -247,6 +291,13 @@ def main():
 
         player.atualizar(dt)
 
+        # Todas as estrelas giram e flutuam independentemente do FPS.
+        tempo_estrela += dt
+        for i, estrela in enumerate(estrelas):
+            estrela.rotacao.y += velocidade_giro_estrela * dt
+            fase = tempo_estrela * frequencia_flutuacao + i * 0.5
+            estrela.posicao.y = estrela.base_y + amplitude_flutuacao * math.sin(fase)
+
         # CAMERA
         camera.seguir(player, dt, esquerda, direita, movimentando)
 
@@ -256,28 +307,63 @@ def main():
         # LIMPA A TELA
         ctx.clear(*FUNDO, depth=1.0)
 
-        # ILUMINACAO
-        posicao_luz_camera = visao * luz.posicao
+        # ILUMINACAO BLINN-PHONG: duas fontes no shader de objetos texturizados.
+        # Tudo e calculado no ESPACO DO MUNDO no fragment shader.
+        camera_posicao = glm.vec3(glm.inverse(visao)[3])
+        programa_textura["u_camera_posicao"].value = tuple(camera_posicao)
+        programa_textura["u_direcao_luz"].value = (-0.5, 1.0, 1.0)
+        programa_textura["u_cor_luz_direcional"].value = (1.0, 1.0, 1.0)
 
+        # O shader suporta uma fonte pontual: usa a estrela mais proxima do carro.
+        if estrelas:
+            estrela_luz = min(
+                estrelas,
+                key=lambda e: (e.posicao.x - player.posicao.x) ** 2
+                              + (e.posicao.z - player.posicao.z) ** 2
+            )
+            programa_textura["u_luz_estrela_posicao"].value = tuple(estrela_luz.posicao)
+            programa_textura["u_luz_estrela_intensidade"].value = 3.5
+        else:
+            programa_textura["u_luz_estrela_posicao"].value = (0.0, 0.0, 0.0)
+            programa_textura["u_luz_estrela_intensidade"].value = 0.0
+        programa_textura["u_luz_estrela_cor"].value = (1.0, 0.80, 0.24)
+
+        # Mantem os uniformes do shader Phong sem textura (caso usados depois).
+        posicao_luz_camera = visao * luz.posicao
         programa["u_luz"].value = tuple(posicao_luz_camera)
         programa["u_ka"].value = tuple(material.ka)
         programa["u_kd"].value = tuple(material.kd)
         programa["u_ks"].value = tuple(material.ks)
-
         programa["u_ia"].value = tuple(luz.ia)
         programa["u_id"].value = tuple(luz.id)
         programa["u_is"].value = tuple(luz.is_)
-
         programa["u_alfa"].value = material.alfa
-
-        # MATRIZES DA CAMERA
         enviar_matriz(programa, "u_visao", visao)
         enviar_matriz(programa, "u_projecao", projecao)
 
-        # RENDERIZA AS mapa
+        # O mesmo shader usa materiais distintos para mapa, estrela e carro.
+        def definir_material(ka, kd, ks, alfa, emissao=(0.0, 0.0, 0.0)):
+            programa_textura["u_ka"].value = ka
+            programa_textura["u_kd"].value = kd
+            programa_textura["u_ks"].value = ks
+            programa_textura["u_alfa"].value = alfa
+            programa_textura["u_emissao"].value = emissao
+
+        # Mapa: difuso, pouco especular.
+        definir_material((1.0, 1.0, 1.0), (1.0, 1.0, 1.0),
+                         (0.08, 0.08, 0.08), 12.0)
         mapa.desenhar(visao, projecao)
 
-        # RENDERIZA O JOGADOR
+        # Estrela: mais especular + emissao propria (nao e a luz pontual).
+        definir_material((1.0, 1.0, 1.0), (1.0, 1.0, 1.0),
+                         (0.8, 0.65, 0.25), 72.0,
+                         (0.72, 0.52, 0.10))
+        for estrela in estrelas:
+            estrela.desenhar(visao, projecao)
+
+        # Carro: brilho especular diferente do mapa e da estrela.
+        definir_material((1.0, 1.0, 1.0), (1.0, 1.0, 1.0),
+                         (0.35, 0.35, 0.35), 36.0)
         player.desenhar(visao, projecao)
 
         # FPS
@@ -292,6 +378,8 @@ def main():
         glfw.swap_buffers(janela)
         glfw.poll_events()
 
+    for estrela in estrelas:
+        estrela.liberar()
     player.liberar()
     mapa.liberar()
 
