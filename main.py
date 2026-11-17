@@ -238,8 +238,8 @@ def main():
     amplitude_flutuacao = 0.12
     frequencia_flutuacao = 2.0
 
-    player.mudar_escala((0.5, 0.5, 0.5))
-    player.mudar_posicao((0.0, 0.4, 0.0))
+    player.mudar_escala((1.0, 1.0, 1.0))
+    player.mudar_posicao((17.0, -0.2, -5.0))
 
     altura_chassi = 0.21  # Mantem o ajuste anterior das rodas
     distancia_frente = 0.38  # Pontos de amostragem no sentido do carro
