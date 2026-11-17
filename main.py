@@ -11,6 +11,7 @@ import numpy as np
 from camera import Camera
 from malha import Malha
 from colisao_pista import ColisaoPista
+from gerador_objetos import GeradorObjetos
 from material import Material, Luz
 from codigos3D.utils3d import *
 
@@ -18,6 +19,53 @@ PASTA = Path(__file__).parent
 SHADERS = PASTA / "shaders"
 LADO = 960
 FUNDO = (0.08, 0.09, 0.11)
+
+
+class InstanciaCena:
+    """Posicao individual; a geometria e textura ficam no objeto de desenho compartilhado."""
+    def __init__(self, x, y, z, raio=0.0):
+        self.posicao = glm.vec3(x, y, z)
+        self.base_y = y
+        self.raio = raio
+        self.rotacao = 0.0
+        self.pitch = 0.0
+        self.roll = 0.0
+
+
+
+def orientar_objeto_no_solo(colisao, objeto, frente, lateral, inclinacao_maxima=25.0):
+    """Calcula a inclinacao de um objeto parado consultando 4 pontos no mapa.
+
+    Usa o mesmo principio das quatro amostras de altura do carro.
+    Retorna False se nao houver solo suficiente sob os pontos.
+    """
+    angulo = objeto.rotacao  # orientacao horizontal da caixa (eixo Y)
+    frente_x, frente_z = -math.sin(angulo), -math.cos(angulo)
+    direita_x, direita_z = math.cos(angulo), -math.sin(angulo)
+
+    # A referencia evita escolher uma superficie elevada acima da caixa.
+    referencia = objeto.posicao.y + 0.15
+
+    def altura_em(dx, dz):
+        hit = colisao.consultar(objeto.posicao.x + dx,
+                               objeto.posicao.z + dz, referencia)
+        return None if hit is None else hit[0]
+
+    h_frente = altura_em(frente_x * frente, frente_z * frente)
+    h_tras = altura_em(-frente_x * frente, -frente_z * frente)
+    h_direita = altura_em(direita_x * lateral, direita_z * lateral)
+    h_esquerda = altura_em(-direita_x * lateral, -direita_z * lateral)
+
+    limite = math.radians(inclinacao_maxima)
+    if h_frente is not None and h_tras is not None:
+        objeto.pitch = max(-limite, min(limite,
+            math.atan2(h_frente - h_tras, 2.0 * frente)))
+    if h_direita is not None and h_esquerda is not None:
+        objeto.roll = max(-limite, min(limite,
+            math.atan2(h_direita - h_esquerda, 2.0 * lateral)))
+
+    return (h_frente is not None and h_tras is not None
+            and h_direita is not None and h_esquerda is not None)
 
 
 def erro_glfw(codigo, descricao):
@@ -99,44 +147,91 @@ def main():
     mapa = Mapa(ctx, programa_textura, modelo)
     print(f"Árvores carregadas em {time.perf_counter() - inicio:.2f}s")
 
-    # ESTRELAS: mesma geometria OBJ e dimensoes extraidas do OFF.
-    malha_estrela = Malha(PASTA / "modelos" / "estrela.off")
-    limites_estrela = np.ptp(malha_estrela.vertices, axis=0)
-    altura_desejada_estrela = 0.75
-    escala_estrela = altura_desejada_estrela / float(limites_estrela[1])
-    folga_estrela = 0.20
-    y_min_estrela = float(malha_estrela.vertices[:, 1].min())
+    # Um UNICO gerador para todas as categorias: mesma malha e mesmas regras.
+    malha_distribuicao = Malha(PASTA / "modelos" / "chao.off")
+    gerador = GeradorObjetos(malha_distribuicao, modelo)
 
-    # Posicoes iniciais de teste: ajuste as coordenadas que nao cairem no asfalto.
-    # Primeira estrela = posicao que voce ja utilizava na largada.
-    posicoes_estrelas = [
-        (17.0, -4.0),
-        (35.0, -4.0),
-        (12.0, 20.0),
-        (2.0, 27.0),
-        (-12.0, 18.0),
-        (-18.0, 5.0),
-        (-10.0, -12.0),
-        (4.0, -18.0),
-        (15.0, -12.0),
-    ]
+    # Configure aqui os tipos de objeto sem duplicar o algoritmo do sorteio.
+    NUM_ESTRELAS_ALEATORIAS = 7
+    NUM_CAIXAS = 10
+    DISTANCIA_ESTRELAS = 3.5
+    DISTANCIA_CAIXAS = 4.0
+    MARGEM_BORDA = 0.75  # Estrelas
+    MARGEM_BORDA_CAIXAS = 0.20  # Caixas: o raio de 0.65 ja conta como folga
+    SEMENTE = None  # Inteiro para reproduzir as mesmas posicoes.
+    RAIO_ESTRELA = 0.30
+    RAIO_CAIXA = 0.65
+    RAIO_CARRO = 0.50
+    FOLGA_ENTRE_TIPOS = 0.50
+
+    # As reservas impedem estrelas e caixas de nascerem no mesmo lugar.
+    # A largada do jogador tambem fica reservada.
+    reservas = [(0.0, 0.0, 2.0)]
+    rng_posicoes = np.random.default_rng(SEMENTE)
+
+    # Dados leves de cada instancia. O modelo OBJ/VBO/textura e carregado UMA vez
+    # para todas as estrelas e UMA vez para todas as caixas.
+    malha_estrela = Malha(PASTA / "modelos" / "estrela.off")
+    limite_estrela = np.ptp(malha_estrela.vertices, axis=0)
+    escala_estrela = 0.75 / float(limite_estrela[1])
+    y_min_estrela = float(malha_estrela.vertices[:, 1].min())
+    desenho_estrela = ObjetoOBJ(ctx, programa_textura, MODELOS / "estrela.obj")
+    desenho_estrela.mudar_escala((escala_estrela,) * 3)
 
     estrelas = []
-    for x, z in posicoes_estrelas:
-        contato_estrela = colisao_pista.consultar(x, z)
-        if contato_estrela is None:
-            print(f"AVISO: nenhuma superficie sob a estrela em ({x:.2f}, {z:.2f}); ignorada.")
-            continue
+    # Uma estrela perto da largada, se a nova malha confirmar essa posicao.
+    x_inicial, z_inicial = 17.0, -5.1
+    altura_inicial = gerador.altura_no_ponto(x_inicial, z_inicial)
+    if altura_inicial is not None and gerador.distancia_borda(x_inicial, z_inicial) >= MARGEM_BORDA + RAIO_ESTRELA:
+        y = altura_inicial + 0.20 - y_min_estrela * escala_estrela
+        estrelas.append(InstanciaCena(x_inicial, y, z_inicial, raio=RAIO_ESTRELA))
+        reservas.append((x_inicial, z_inicial, RAIO_ESTRELA))
 
-        altura_solo = contato_estrela[0]
-        y = altura_solo + folga_estrela - y_min_estrela * escala_estrela
-        estrela = ObjetoOBJ(ctx, programa_textura, MODELOS / "estrela.obj")
-        estrela.mudar_escala((escala_estrela,) * 3)
-        estrela.mudar_posicao((x, y, z))
-        estrela.rotacao.y = glm.radians(90.0)
-        estrela.base_y = y
-        estrelas.append(estrela)
-        print(f"Estrela posicionada em ({x:.2f}, {y:.2f}, {z:.2f})")
+    pontos = gerador.sortear(
+        NUM_ESTRELAS_ALEATORIAS,
+        distancia_minima=DISTANCIA_ESTRELAS,
+        margem=MARGEM_BORDA,
+        pontos_existentes=reservas,
+        semente=int(rng_posicoes.integers(0, 2**31)),
+        raio=RAIO_ESTRELA,
+        separacao=FOLGA_ENTRE_TIPOS,
+    )
+    for x, y_solo, z in pontos:
+        y = y_solo + 0.20 - y_min_estrela * escala_estrela
+        estrelas.append(InstanciaCena(x, y, z, raio=RAIO_ESTRELA))
+        reservas.append((x, z, RAIO_ESTRELA))
+
+    # As caixas sao obstaculos parados, sobre a MESMA faixa de pista.
+    malha_caixa = Malha(PASTA / "modelos" / "caixa.off")
+    dimensoes_caixa = np.ptp(malha_caixa.vertices, axis=0)
+    escala_caixa = 0.28 / float(dimensoes_caixa[1])  # ~95 cm na escala do jogo.
+    y_min_caixa = float(malha_caixa.vertices[:, 1].min())
+    desenho_caixa = ObjetoOBJ(ctx, programa_textura, MODELOS / "caixa.obj")
+    desenho_caixa.mudar_escala((escala_caixa,) * 3)
+
+    caixas = []
+    pontos = gerador.sortear(
+        NUM_CAIXAS,
+        distancia_minima=DISTANCIA_CAIXAS,
+        margem=MARGEM_BORDA_CAIXAS,
+        pontos_existentes=reservas,
+        semente=int(rng_posicoes.integers(0, 2**31)),
+        raio=RAIO_CAIXA,
+        separacao=FOLGA_ENTRE_TIPOS,
+    )
+    for x, y_solo, z in pontos:
+        y = y_solo - y_min_caixa * escala_caixa
+        caixa = InstanciaCena(x, y, z, raio=RAIO_CAIXA)
+        caixa.rotacao = float(rng_posicoes.uniform(-math.pi, math.pi))
+        # Amostra o terreno nas quatro direcoes da caixa, como no carro.
+        # As dimensoes em X e Z ja incluem a escala aplicada ao OBJ.
+        raio_frente = max(0.05, float(dimensoes_caixa[2]) * escala_caixa * 0.40)
+        raio_lateral = max(0.05, float(dimensoes_caixa[0]) * escala_caixa * 0.40)
+        orientar_objeto_no_solo(colisao_pista, caixa, raio_frente, raio_lateral)
+        caixas.append(caixa)
+        reservas.append((x, z, RAIO_CAIXA))
+
+    print(f"Distribuicao: {len(estrelas)} estrelas e {len(caixas)} caixas na pista.")
 
     tempo_estrela = 0.0
     velocidade_giro_estrela = glm.radians(90.0)
@@ -218,7 +313,32 @@ def main():
         esquerda = glfw.get_key(janela, glfw.KEY_LEFT) == glfw.PRESS
         direita = glfw.get_key(janela, glfw.KEY_RIGHT) == glfw.PRESS
 
+        #pos antes do jog pra assim saber pra onde ir caso tenha colisão e a movimentação dele
+        posicao_antes = glm.vec3(player.posicao)
         movimentando = player.movimentacao(frente, tras, esquerda, direita, dt)
+
+        # Colisao basica jogador x caixa: nao atravessar obstaculos.
+
+        #quanto andou
+        px0, pz0 = posicao_antes.x, posicao_antes.z
+        px1, pz1 = player.posicao.x, player.posicao.z
+        dx, dz = px1 - px0, pz1 - pz0
+        comprimento2 = dx * dx + dz * dz
+
+        for caixa in caixas: #roda todas as caixas pra ve se colidiu com aula
+            if comprimento2 > 1e-12: #se andou
+                t = max(0.0, min(1.0,
+                    ((caixa.posicao.x - px0) * dx + (caixa.posicao.z - pz0) * dz)
+                    / comprimento2)) #olha a pos q chegou mais perto da caixa
+            else:
+                t = 0.0
+            perto_x = px0 + t * dx
+            perto_z = pz0 + t * dz
+            limite = RAIO_CARRO + caixa.raio
+            if (perto_x - caixa.posicao.x)**2 + (perto_z - caixa.posicao.z)**2 < limite**2: #se passou de r1+r2 q é limite ele  volta pra pos ant
+                player.posicao.x = posicao_antes.x
+                player.posicao.z = posicao_antes.z
+                break
 
         # O carro se move em X/Z no Player; a altura vem da malha real do mapa.
         contato = colisao_pista.consultar(
@@ -294,7 +414,7 @@ def main():
         # Todas as estrelas giram e flutuam independentemente do FPS.
         tempo_estrela += dt
         for i, estrela in enumerate(estrelas):
-            estrela.rotacao.y += velocidade_giro_estrela * dt
+            estrela.rotacao += velocidade_giro_estrela * dt
             fase = tempo_estrela * frequencia_flutuacao + i * 0.5
             estrela.posicao.y = estrela.base_y + amplitude_flutuacao * math.sin(fase)
 
@@ -359,7 +479,19 @@ def main():
                          (0.8, 0.65, 0.25), 72.0,
                          (0.72, 0.52, 0.10))
         for estrela in estrelas:
-            estrela.desenhar(visao, projecao)
+            desenho_estrela.mudar_posicao(estrela.posicao)
+            desenho_estrela.rotacao.y = estrela.rotacao
+            desenho_estrela.desenhar(visao, projecao)
+
+        # Caixas: material sem emissao, modelo e textura compartilhados.
+        definir_material((1.0, 1.0, 1.0), (0.85, 0.85, 0.85),
+                         (0.12, 0.12, 0.12), 16.0)
+        for caixa in caixas:
+            desenho_caixa.mudar_posicao(caixa.posicao)
+            desenho_caixa.rotacao.x = caixa.pitch
+            desenho_caixa.rotacao.y = caixa.rotacao
+            desenho_caixa.rotacao.z = caixa.roll
+            desenho_caixa.desenhar(visao, projecao)
 
         # Carro: brilho especular diferente do mapa e da estrela.
         definir_material((1.0, 1.0, 1.0), (1.0, 1.0, 1.0),
@@ -378,8 +510,8 @@ def main():
         glfw.swap_buffers(janela)
         glfw.poll_events()
 
-    for estrela in estrelas:
-        estrela.liberar()
+    desenho_estrela.liberar()
+    desenho_caixa.liberar()
     player.liberar()
     mapa.liberar()
 
