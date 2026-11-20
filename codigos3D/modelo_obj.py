@@ -2,6 +2,8 @@
 import numpy as np
 from array import array
 from pathlib import Path
+import json
+import hashlib
 
 
 class ModeloOBJ:
@@ -12,6 +14,9 @@ class ModeloOBJ:
         inicio = time.perf_counter()
 
         self.arquivo_obj = Path(arquivo_obj)
+        if self._tentar_cache():
+            print(f"Cache OBJ: {self.arquivo_obj.name} ({len(self.grupos)} grupos)")
+            return
 
         self.materiais = {}
         self.grupos = []
@@ -235,3 +240,64 @@ class ModeloOBJ:
             f"{sum(len(g['dados']) for g in self.grupos)} vertices; "
             f"{fim - inicio:.2f} segundos"
         )
+
+
+    def _cache_info(self):
+        caminho = self.arquivo_obj.resolve()
+        stat = caminho.stat()
+        # Se MTL for atualizado, a cache tambem precisa ser reconstruida.
+        refs = []
+        with caminho.open(encoding="utf-8") as arquivo:
+            # mtllib fica no cabecalho OBJ (Blender exporta na linha 3).
+            # Nao percorra 170 MB de texto so para validar o cache!
+            for i, linha in enumerate(arquivo):
+                if i > 100:
+                    break
+                if linha.startswith("mtllib "):
+                    for nome in linha.strip().split()[1:]:
+                        mtl = caminho.parent / nome
+                        if mtl.is_file():
+                            st = mtl.stat()
+                            refs.append([str(mtl), st.st_size, st.st_mtime_ns])
+        chave = [str(caminho), stat.st_size, stat.st_mtime_ns, refs, "obj-v1"]
+        pasta = caminho.parent.parent / ".cache_careca"
+        nome = "obj_" + hashlib.sha256(str(caminho).encode()).hexdigest()[:12]
+        return pasta, nome, chave
+
+    def _tentar_cache(self):
+        try:
+            pasta, nome, chave = self._cache_info()
+            meta = pasta / (nome + ".json")
+            if not meta.exists():
+                return False
+            info = json.loads(meta.read_text(encoding="utf-8"))
+            if info.get("chave") != chave:
+                return False
+            grupos = []
+            for i, g in enumerate(info["grupos"]):
+                arquivo = pasta / (nome + f"_{i}.npy")
+                dados = np.load(arquivo, mmap_mode="r", allow_pickle=False)
+                grupos.append({"material": g["material"], "dados": dados,
+                               "textura": Path(g["textura"]) if g["textura"] else None})
+            self.grupos = grupos
+            self.materiais = {}
+            return True
+        except (OSError, ValueError, KeyError, json.JSONDecodeError):
+            return False
+
+    def _salvar_cache(self):
+        if self.arquivo_obj.stat().st_size < 1000000:
+            return
+        try:
+            pasta, nome, chave = self._cache_info()
+            pasta.mkdir(parents=True, exist_ok=True)
+            grupos = []
+            for i, grupo in enumerate(self.grupos):
+                np.save(pasta / (nome + f"_{i}.npy"), grupo["dados"])
+                grupos.append({"material": grupo["material"],
+                               "textura": str(grupo["textura"]) if grupo["textura"] else None})
+            (pasta / (nome + ".json")).write_text(
+                json.dumps({"chave": chave, "grupos": grupos}), encoding="utf-8")
+            print(f"Cache OBJ criado: {self.arquivo_obj.name}")
+        except OSError as exc:
+            print(f"Cache OBJ indisponivel: {exc}")
