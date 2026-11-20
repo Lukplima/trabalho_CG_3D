@@ -25,6 +25,7 @@ from fisica import (ColisaoPista, colide_carro_caixa, colide_trajeto_3d,
 from jogo import GeradorObjetos, ControleCorrida, SistemaVidas
 from codigos3D.utils3d import Player, Mapa, ObjetoOBJ, MODELOS
 from interface import HUDJogo, Renderizador2D
+from skybox import Skybox
 
 PASTA = Path(__file__).parent
 SHADERS = PASTA / "shaders"
@@ -140,6 +141,12 @@ def main():
     programa_textura = carregar_programa_textura(ctx)
 
     camera = Camera(distancia=5.0)
+
+    skybox = Skybox(
+        ctx,
+        SHADERS,
+        PASTA / "imagens" / "sky_04_2k.png"
+    )
 
     modelo = glm.scale(
         malha.matriz_enquadramento(),
@@ -516,6 +523,8 @@ def main():
                             + (destino[1] - posicao_antes.y)**2
                             + (destino[2] - posicao_antes.z)**2) > 1e-12:
                         sistema_vidas.colidiu()
+                        if player.tempo_colisao <= 0.0:
+                            player.recuar()
                     break
 
             if sistema_vidas.teve_colisao() and sistema_vidas.aplicar_dano(tempo_jogo):
@@ -652,6 +661,8 @@ def main():
 
         # LIMPA A TELA
         ctx.clear(*FUNDO, depth=1.0)
+        # SKYBOX: desenhado antes do mapa e dos objetos.
+        skybox.desenhar(visao, projecao)
 
         # ILUMINACAO BLINN-PHONG: duas fontes no shader de objetos texturizados.
         # Tudo e calculado no ESPACO DO MUNDO no fragment shader.
@@ -758,6 +769,7 @@ def main():
     desenho_caixa.liberar()
     player.liberar()
     mapa.liberar()
+    skybox.liberar()
 
     programa_textura.release()
     glfw.terminate()

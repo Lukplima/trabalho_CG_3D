@@ -121,6 +121,7 @@ class Objeto:
         self.textura = None
 
 
+
 class Player(Objeto):
     def __init__(self, ctx, programa):
 
@@ -137,6 +138,16 @@ class Player(Objeto):
         self.velocidade = 3.0
         self.velocidade_giro = 2.0
 
+        # Velocidade atual do carro: positiva para frente e negativa para ré.
+        self.velocidade_movimento = 0.0
+
+        # Ajustes de aceleração e desaceleração.
+        self.aceleracao = 8.0
+        self.desaceleracao = 4.0
+
+        # Tempo para evitar que uma mesma colisão aplique vários recuos.
+        self.tempo_colisao = 0.0
+
     def matriz_modelo(self):
         # Orientacao: primeiro a direcao horizontal, depois a inclinacao local.
         matriz = glm.mat4(1.0)
@@ -148,40 +159,75 @@ class Player(Objeto):
 
     def atualizar(self, delta_tempo):
         self.dt = delta_tempo
+        self.tempo_colisao = max(0.0, self.tempo_colisao - delta_tempo)
+
+    def recuar(self):
+        # Impulso para trás ao atingir um obstáculo.
+        intensidade = max(abs(self.velocidade_movimento) * 0.8,
+                  self.velocidade * 0.6)
+
+        self.velocidade_movimento = -intensidade
+        self.tempo_colisao = 0.4
 
     def movimentacao(self, frente, tras, esquerda, direita, dt):
-        movimentando = frente or tras
+
+        # Define a velocidade desejada.
+        if frente and not tras:
+            velocidade_alvo = self.velocidade
+        elif tras and not frente:
+            velocidade_alvo = -self.velocidade
+        else:
+            velocidade_alvo = 0.0
+
+        # Aproxima gradualmente a velocidade atual da desejada.
+        if velocidade_alvo != 0.0:
+            diferenca = velocidade_alvo - self.velocidade_movimento
+            limite = self.aceleracao * dt
+        else:
+            diferenca = -self.velocidade_movimento
+            limite = self.desaceleracao * dt
+
+        if abs(diferenca) <= limite:
+            self.velocidade_movimento = velocidade_alvo
+        else:
+            self.velocidade_movimento += (
+                limite if diferenca > 0 else -limite
+            )
+
+        movimentando = abs(self.velocidade_movimento) > 0.01
 
         if movimentando:
 
-            # ROTAÇÃO
+            # A direção da rotação acompanha o sentido do movimento.
+            sentido = 1.0 if self.velocidade_movimento > 0 else -1.0
+
             if esquerda:
-                self.girar(0.0, self.velocidade_giro * dt, 0.0)
+                self.girar(
+                    0.0,
+                    self.velocidade_giro * dt * sentido,
+                    0.0
+                )
 
             if direita:
-                self.girar(0.0, -self.velocidade_giro * dt, 0.0)
+                self.girar(
+                    0.0,
+                    -self.velocidade_giro * dt * sentido,
+                    0.0
+                )
 
-            # DIREÇÃO DO CARRO
+            # Direção do carro.
             direcao_x = -glm.sin(self.rotacao.y)
             direcao_z = -glm.cos(self.rotacao.y)
 
-            # AVANÇAR
-            if frente:
-                self.mover((
-                    direcao_x * self.velocidade * dt,
-                    0.0,
-                    direcao_z * self.velocidade * dt
-                ))
-
-            # DAR RÉ
-            elif tras:
-                self.mover((
-                    -direcao_x * self.velocidade * dt,
-                    0.0,
-                    -direcao_z * self.velocidade * dt
-                ))
+            # Movimento com a velocidade atual.
+            self.mover((
+                direcao_x * self.velocidade_movimento * dt,
+                0.0,
+                direcao_z * self.velocidade_movimento * dt
+            ))
 
         return movimentando
+
     
 
 class ObjetoOBJ:
