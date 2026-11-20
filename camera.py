@@ -1,6 +1,5 @@
 """Camera LookAt com projecao perspectiva e controle orbital pelo mouse."""
 import glm
-import math
 
 class Camera:
     def __init__(self, distancia=5.0):
@@ -12,6 +11,7 @@ class Camera:
         self.elevacao = 0.25
 
         self.velocidade_giro = 2.0
+        self.visao_geral = False
 
     def orbitar(self, dx, dy, sensibilidade=0.006):
         self.azimute -= dx * sensibilidade
@@ -37,6 +37,10 @@ class Camera:
 
     #Visão do Player
     def seguir(self, player, dt, esquerda, direita, movimentando):
+        if self.visao_geral:
+            self.alvo = glm.vec3(player.posicao)
+            return
+        
         # ACOMPANHA A POSIÇÃO DO PLAYER
         self.alvo = glm.vec3(player.posicao)
 

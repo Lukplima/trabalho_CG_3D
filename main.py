@@ -347,6 +347,20 @@ def main():
             ultimo_cursor = None
         elif key == glfw.KEY_R and gameover:
             reiniciar_partida()
+        elif key == glfw.KEY_C:
+            camera.visao_geral = not camera.visao_geral
+
+            if camera.visao_geral:
+                camera.alvo = glm.vec3(0.0, 0.0, 0.0)
+                camera.distancia = 15.0
+                camera.azimute = 0.0
+                camera.elevacao = glm.radians(65.0)
+                print("Visao geral ativada")
+            else:
+                camera.distancia = 5.0
+                camera.azimute = glm.radians(-90.0)
+                camera.elevacao = 0.25
+                print("Camera do jogador ativada")
 
     def botao_mouse(window, button, action, mods):
         nonlocal arrastando, ultimo_cursor
