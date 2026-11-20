@@ -3,13 +3,18 @@
 from pathlib import Path
 import numpy as np
 import glm
+import json
 
 
 class Malha:
     def __init__(self, caminho):
         self.caminho = Path(caminho)
-        self.vertices, self.faces = self.ler_off(self.caminho)
-        self.normais = self.calcular_normais()
+        # Cache dos vertices, faces e normais. O OFF continua intacto.
+        # Nas proximas aberturas evitamos reler milhoes de linhas e recalcular normais.
+        if not self._tentar_cache():
+            self.vertices, self.faces = self.ler_off(self.caminho)
+            self.normais = self.calcular_normais()
+            self._salvar_cache()
 
         minimo = self.vertices.min(axis=0)
         maximo = self.vertices.max(axis=0)
@@ -24,6 +29,49 @@ class Malha:
 
         if self.raio <= 1e-12:
             raise ValueError("A malha possui dimensao nula.")
+
+    def _pasta_cache(self):
+        return self.caminho.resolve().parent.parent / ".cache_careca" if self.caminho.parent.name == "modelos" else self.caminho.resolve().parent / ".cache_careca"
+
+    def _chave_cache(self):
+        stat = self.caminho.stat()
+        return f"{self.caminho.name}:{stat.st_size}:{stat.st_mtime_ns}:malha-v1"
+
+    def _arquivos_cache(self):
+        import hashlib
+        pasta = self._pasta_cache()
+        codigo = hashlib.sha256(str(self.caminho.resolve()).encode()).hexdigest()[:12]
+        return pasta / (codigo + "_vertices.npy"), pasta / (codigo + "_faces.npy"), pasta / (codigo + "_normais.npy"), pasta / (codigo + "_meta.json")
+
+    def _tentar_cache(self):
+        vertices, faces, normais, meta = self._arquivos_cache()
+        try:
+            if not meta.exists() or not all(f.exists() for f in (vertices, faces, normais)):
+                return False
+            if json.loads(meta.read_text()) != {"chave": self._chave_cache()}:
+                return False
+            self.vertices = np.load(vertices, mmap_mode="r")
+            self.faces = np.load(faces, mmap_mode="r")
+            self.normais = np.load(normais, mmap_mode="r")
+            print(f"Cache OFF: {self.caminho.name}")
+            return True
+        except (OSError, ValueError, KeyError, json.JSONDecodeError):
+            return False
+
+    def _salvar_cache(self):
+        # Evita cache para malhas pequenas, onde leitura direta ja e rapida.
+        if len(self.faces) < 10000:
+            return
+        try:
+            vertices, faces, normais, meta = self._arquivos_cache()
+            vertices.parent.mkdir(parents=True, exist_ok=True)
+            np.save(vertices, self.vertices)
+            np.save(faces, self.faces)
+            np.save(normais, self.normais)
+            meta.write_text(json.dumps({"chave": self._chave_cache()}))
+            print(f"Cache OFF criado: {self.caminho.name}")
+        except OSError as exc:
+            print(f"Cache OFF indisponivel, usando leitura normal: {exc}")
 
     @staticmethod
     def ler_off(caminho):

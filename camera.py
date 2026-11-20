@@ -33,12 +33,13 @@ class Camera:
                           glm.vec3(0.0, 1.0, 0.0))
 
     def projecao(self):
-        return glm.perspective(self.fovy, self.aspecto, 0.05, 100.0)
+        return glm.perspective(self.fovy, self.aspecto, 0.05, 300.0)
 
     #Visão do Player
     def seguir(self, player, dt, esquerda, direita, movimentando):
         if self.visao_geral:
-            self.alvo = glm.vec3(player.posicao)
+            # O circuito tem ~80 unidades: camera deve mostrar a pista inteira.
+            self.alvo = glm.vec3(0.0, 0.0, 0.0)
             return
         
         # ACOMPANHA A POSIÇÃO DO PLAYER
