@@ -27,6 +27,7 @@ from codigos3D.utils3d import *
 from hud_vidas import HUDVidas
 from sprite_2d import Renderizador2D
 from sistema_vidas import SistemaVidas
+from limite_malha import movimentar_com_limite
 
 PASTA = Path(__file__).parent
 SHADERS = PASTA / "shaders"
@@ -277,7 +278,7 @@ def main():
     frequencia_flutuacao = 2.0
 
     player.mudar_escala((0.5, 0.5, 0.5))
-    player.mudar_posicao((0.0, 0.4, 0.0))
+    player.mudar_posicao((17.0, -0.7, -5.0))
 
     # Dimensoes do carro NOVO, apos a normalizacao feita por Modelo3D.
     vertices_carro = player.modelo_off.vertices
@@ -405,13 +406,15 @@ def main():
             esquerda = glfw.get_key(janela, glfw.KEY_LEFT) == glfw.PRESS
             direita = glfw.get_key(janela, glfw.KEY_RIGHT) == glfw.PRESS
 
-            #pos antes do jog pra assim saber pra onde ir caso tenha colisão e a movimentação dele
-            posicao_antes = glm.vec3(player.posicao)
             sistema_vidas.reinicia_colisao()
             if sistema_vidas.vida_atual() > 0:
-                movimentando = player.movimentacao(frente, tras, esquerda, direita, dt)
+                movimentando, posicao_antes = movimentar_com_limite(
+                    player, colisao_pista, frente, tras, esquerda, direita, dt,
+                    distancia_frente, distancia_lateral
+                )
             else:
                 movimentando = False  # Sem vidas: carro parado
+                posicao_antes = glm.vec3(player.posicao)
 
             # Colisao 3D carro x caixa:
             # - consulta a altura no destino antes de validar a movimentacao;

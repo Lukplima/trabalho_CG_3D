@@ -182,7 +182,39 @@ class Player(Objeto):
                 ))
 
         return movimentando
-    
+
+    def dentro_da_malha(self, colisao_pista, distancia_frente,
+                        distancia_lateral, y_referencia=None):
+        """Verifica se o centro e os quatro cantos do carro estao sobre a malha."""
+        angulo = self.rotacao.y
+
+        frente_x = -glm.sin(angulo)
+        frente_z = -glm.cos(angulo)
+        direita_x = glm.cos(angulo)
+        direita_z = -glm.sin(angulo)
+
+        pontos = [
+            (0.0, 0.0),
+            (distancia_frente, distancia_lateral),
+            (distancia_frente, -distancia_lateral),
+            (-distancia_frente, distancia_lateral),
+            (-distancia_frente, -distancia_lateral),
+        ]
+
+        if y_referencia is None:
+            y_referencia = self.posicao.y
+
+        for frente, lateral in pontos:
+            x = (self.posicao.x + frente_x * frente
+                 + direita_x * lateral)
+            z = (self.posicao.z + frente_z * frente
+                 + direita_z * lateral)
+
+            if colisao_pista.consultar(x, z, y_referencia) is None:
+                return False
+
+        return True
+
 
 class ObjetoOBJ:
 
