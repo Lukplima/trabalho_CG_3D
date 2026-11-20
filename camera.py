@@ -8,7 +8,7 @@ class Camera:
         self.alvo = glm.vec3(0.0, 0.0, 0.0)
         self.aspecto = 1.0
         self.fovy = glm.radians(45.0)
-        self.azimute = 0.0
+        self.azimute = glm.radians(-90.0)
         self.elevacao = 0.25
 
         self.velocidade_giro = 2.0

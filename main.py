@@ -278,7 +278,8 @@ def main():
     frequencia_flutuacao = 2.0
 
     player.mudar_escala((0.5, 0.5, 0.5))
-    player.mudar_posicao((17.0, -0.7, -5.0))
+    player.mudar_posicao((-6.002, 0.244, -4.469))
+    player.mudar_rotacao((0.0, glm.radians(-90), 0.0))
 
     # Dimensoes do carro NOVO, apos a normalizacao feita por Modelo3D.
     vertices_carro = player.modelo_off.vertices
@@ -619,6 +620,13 @@ def main():
         definir_material((1.0, 1.0, 1.0), (1.0, 1.0, 1.0),
                          (0.35, 0.35, 0.35), 36.0)
         player.desenhar(visao, projecao)
+        print(
+    f"\rPlayer X: {player.posicao.x:.3f} | "
+    f"Y: {player.posicao.y:.3f} | "
+    f"Z: {player.posicao.z:.3f}",
+    end="",
+    flush=True
+)
 
         # FPS
         quadros += 1
