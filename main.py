@@ -1,3 +1,12 @@
+# CONTROLES (reaproveitados do Trabalho 03):
+# ESPACO - Iniciar o jogo
+# SETAS - Movimentar o carro
+# P - Pausar ou retomar a partida
+# R - Reiniciar apos o Game Over
+# V - Ativar ou desativar o V-Sync
+# MOUSE - Girar/aproximar a camera
+# ESC - Fechar o jogo
+
 
 import sys
 import math
@@ -11,6 +20,7 @@ import numpy as np
 from camera import Camera
 from malha import Malha
 from colisao_pista import ColisaoPista
+from colisao_obstaculos import colide_trajeto_3d
 from gerador_objetos import GeradorObjetos
 from material import Material, Luz
 from codigos3D.utils3d import *
@@ -125,6 +135,19 @@ def main():
     sprites_2d = Renderizador2D(ctx, SHADERS)
     hud_vidas = HUDVidas(sprites_2d, PASTA / "imagens" / "heart_32x32.png",
                         PASTA / "imagens" / "heart_empty_32x32.png", total=3)
+    # Mesmas telas do Trabalho 03, desenhadas pelo Sprite2D reutilizavel.
+    # O retangulo, o VBO/VAO e o programa GLSL sao compartilhados pelo HUD.
+    pasta_imagens = PASTA / "imagens"
+    tela_inicio = sprites_2d.criar_sprite(pasta_imagens / "tela_inicial.png")
+    tela_pausa = sprites_2d.criar_sprite(pasta_imagens / "tela_paused.png")
+    tela_gameover = sprites_2d.criar_sprite(pasta_imagens / "tela_gameover.png")
+
+    # Estados mantidos do Trabalho 03: inicio, pausa e gameover.
+    inicio = True
+    pause = False
+    gameover = False
+    tempo_jogo = 0.0  # So avanca com a partida em andamento.
+
     # Mesmos metodos do CarroPlayer do jogo 2D, adaptados ao carro 3D.
     sistema_vidas = SistemaVidas(total=3, intervalo_dano=1.2)
 
@@ -149,13 +172,13 @@ def main():
     import time
 
     # OBJETOS
-    inicio = time.perf_counter()
+    inicio_carregamento = time.perf_counter()
     player = Player(ctx, programa_textura)
-    print(f"Player carregado em {time.perf_counter() - inicio:.2f}s")
+    print(f"Player carregado em {time.perf_counter() - inicio_carregamento:.2f}s")
 
-    inicio = time.perf_counter()
+    inicio_carregamento = time.perf_counter()
     mapa = Mapa(ctx, programa_textura, modelo)
-    print(f"Árvores carregadas em {time.perf_counter() - inicio:.2f}s")
+    print(f"Mapa carregado em {time.perf_counter() - inicio_carregamento:.2f}s")
 
     # Um UNICO gerador para todas as categorias: mesma malha e mesmas regras.
     malha_distribuicao = Malha(PASTA / "modelos" / "chao.off")
@@ -172,7 +195,8 @@ def main():
     RAIO_ESTRELA = 0.30
     RAIO_CAIXA = 0.42  # Usado somente para distribuir as caixas na pista.
     RAIO_COLISAO_CAIXA = 0.23  # Área real de bloqueio menor.
-    RAIO_COLISAO_CARRO = 0.18  # Área real de bloqueio menor.
+    RAIO_COLISAO_CARRO = 0.18  # Raio horizontal do carro (colisao).
+    MEIA_ALTURA_COLISAO_CARRO = 0.16  # Metade da altura usada na colisao 3D.
     FOLGA_ENTRE_TIPOS = 0.50
 
     # As reservas impedem estrelas e caixas de nascerem no mesmo lugar.
@@ -219,6 +243,9 @@ def main():
     y_min_caixa = float(malha_caixa.vertices[:, 1].min())
     desenho_caixa = ObjetoOBJ(ctx, programa_textura, MODELOS / "caixa.obj")
     desenho_caixa.mudar_escala((escala_caixa,) * 3)
+    MEIA_ALTURA_COLISAO_CAIXA = float(dimensoes_caixa[1]) * escala_caixa / 2.0
+    CENTRO_LOCAL_CAIXA_Y = (float(malha_caixa.vertices[:, 1].min())
+                            + float(malha_caixa.vertices[:, 1].max())) * escala_caixa / 2.0
 
     caixas = []
     pontos = gerador.sortear(
@@ -264,8 +291,25 @@ def main():
     else:
         print("AVISO: não há superfície sob a posição inicial do carro.")
 
+    def reiniciar_partida():
+        """Reinicia vidas, tempo, carro e animacao, sem recarregar recursos GPU."""
+        nonlocal inicio, pause, gameover, tempo_jogo, tempo_estrela
+        sistema_vidas.reinicia_vidas()
+        inicio, pause, gameover = False, False, False
+        tempo_jogo = 0.0
+        tempo_estrela = 0.0
+        player.mudar_posicao((0.0, 0.4, 0.0))
+        player.mudar_rotacao((0.0, 0.0, 0.0))
+        contato = colisao_pista.consultar(0.0, 0.0)
+        if contato is not None:
+            player.posicao.y = contato[0] + altura_chassi
+        for estrela in estrelas:
+            estrela.posicao.y = estrela.base_y
+            estrela.rotacao = 0.0
+        print("Partida reiniciada: 3 vidas")
+
     def tecla(window, key, scancode, action, mods):
-        nonlocal vsync
+        nonlocal vsync, inicio, pause, arrastando, ultimo_cursor
         if action != glfw.PRESS:
             return
         if key == glfw.KEY_ESCAPE:
@@ -273,19 +317,22 @@ def main():
         elif key == glfw.KEY_V:
             vsync = not vsync
             glfw.swap_interval(1 if vsync else 0)
-        elif key == glfw.KEY_R and sistema_vidas.vida_atual() == 0:
-            sistema_vidas.reinicia_vidas()
-            player.posicao.x = 0.0
-            player.posicao.z = 0.0
-            contato_reinicio = colisao_pista.consultar(0.0, 0.0)
-            if contato_reinicio is not None:
-                player.posicao.y = contato_reinicio[0] + altura_chassi
-            player.rotacao.x = 0.0
-            player.rotacao.z = 0.0
-            print("Partida reiniciada: 3 vidas")
+        elif key == glfw.KEY_SPACE and inicio:
+            inicio = False
+        elif key == glfw.KEY_P and not inicio and not gameover:
+            pause = not pause
+            # Cancela arrasto para nao mover a camera nem dar saltos na volta.
+            arrastando = False
+            ultimo_cursor = None
+        elif key == glfw.KEY_R and gameover:
+            reiniciar_partida()
 
     def botao_mouse(window, button, action, mods):
         nonlocal arrastando, ultimo_cursor
+        if inicio or pause or gameover:
+            arrastando = False
+            ultimo_cursor = None
+            return
         if button != glfw.MOUSE_BUTTON_LEFT:
             return
         if action == glfw.PRESS:
@@ -297,7 +344,7 @@ def main():
 
     def mover_mouse(window, x, y):
         nonlocal ultimo_cursor
-        if not arrastando or ultimo_cursor is None:
+        if inicio or pause or gameover or not arrastando or ultimo_cursor is None:
             return
         dx = x - ultimo_cursor[0]
         dy = y - ultimo_cursor[1]
@@ -305,7 +352,8 @@ def main():
         ultimo_cursor = (x, y)
 
     def rolagem(window, dx, dy):
-        camera.zoom(dy)
+        if not inicio and not pause and not gameover:
+            camera.zoom(dy)
 
     def redimensionar(window, largura, altura):
         largura, altura = max(1, largura), max(1, altura)
@@ -328,134 +376,147 @@ def main():
         dt = min(agora - instante_anterior, 0.05)
         instante_anterior = agora
 
-        # CONTROLES DO JOGADOR
-        frente = glfw.get_key(janela, glfw.KEY_UP) == glfw.PRESS
-        tras = glfw.get_key(janela, glfw.KEY_DOWN) == glfw.PRESS
-        esquerda = glfw.get_key(janela, glfw.KEY_LEFT) == glfw.PRESS
-        direita = glfw.get_key(janela, glfw.KEY_RIGHT) == glfw.PRESS
+        # No Trabalho 03, so se atualiza o jogo no estado "jogando".
+        # Ao pausar, dt continua sendo medido, mas nao move nenhum objeto.
+        if not inicio and not pause and not gameover:
+            tempo_jogo += dt
+            # CONTROLES DO JOGADOR
+            frente = glfw.get_key(janela, glfw.KEY_UP) == glfw.PRESS
+            tras = glfw.get_key(janela, glfw.KEY_DOWN) == glfw.PRESS
+            esquerda = glfw.get_key(janela, glfw.KEY_LEFT) == glfw.PRESS
+            direita = glfw.get_key(janela, glfw.KEY_RIGHT) == glfw.PRESS
 
-        #pos antes do jog pra assim saber pra onde ir caso tenha colisão e a movimentação dele
-        posicao_antes = glm.vec3(player.posicao)
-        sistema_vidas.reinicia_colisao()
-        if sistema_vidas.vida_atual() > 0:
-            movimentando = player.movimentacao(frente, tras, esquerda, direita, dt)
-        else:
-            movimentando = False  # Sem vidas: carro parado
-
-        # Colisao basica jogador x caixa: nao atravessar obstaculos.
-
-        #quanto andou
-        px0, pz0 = posicao_antes.x, posicao_antes.z
-        px1, pz1 = player.posicao.x, player.posicao.z
-        dx, dz = px1 - px0, pz1 - pz0
-        comprimento2 = dx * dx + dz * dz
-
-        for caixa in caixas: #roda todas as caixas pra ve se colidiu com alguma
-            if comprimento2 > 1e-12: #se andou
-                t = max(0.0, min(1.0,
-                    ((caixa.posicao.x - px0) * dx + (caixa.posicao.z - pz0) * dz)
-                    / comprimento2)) #a pos mais perto foi em 60% do caminho
+            #pos antes do jog pra assim saber pra onde ir caso tenha colisão e a movimentação dele
+            posicao_antes = glm.vec3(player.posicao)
+            sistema_vidas.reinicia_colisao()
+            if sistema_vidas.vida_atual() > 0:
+                movimentando = player.movimentacao(frente, tras, esquerda, direita, dt)
             else:
-                t = 0.0
-            #aq é a posicao de fato
-            perto_x = px0 + t * dx
-            perto_z = pz0 + t * dz
-            limite = RAIO_COLISAO_CARRO + RAIO_COLISAO_CAIXA
-            if (perto_x - caixa.posicao.x)**2 + (perto_z - caixa.posicao.z)**2 < limite**2: #se passou de r1+r2 q é limite ele  volta pra pos ant
-                player.posicao.x = posicao_antes.x
-                player.posicao.z = posicao_antes.z
+                movimentando = False  # Sem vidas: carro parado
 
-                # Igual ao codigo 2D: primeiro registra a colisao,
-                # depois verifica se pode descontar uma vida.
-                if comprimento2 > 1e-12:
-                    sistema_vidas.colidiu()
-                break
-
-        if sistema_vidas.teve_colisao() and sistema_vidas.aplicar_dano(agora):
-            print(f"Bateu na caixa! Vidas restantes: {sistema_vidas.vida_atual()}")
-            if sistema_vidas.vida_atual() == 0:
-                print("GAME OVER - Aperte R para reiniciar")
-
-        # O carro se move em X/Z no Player; a altura vem da malha real do mapa.
-        contato = colisao_pista.consultar(
-            player.posicao.x, player.posicao.z,
-            player.posicao.y - altura_chassi + 0.15
-        )
-
-        if contato is not None:
-            altura_pista, normal_pista = contato
-            player.posicao.y = altura_pista + altura_chassi
-
-        # Se não há superfície, mantém a altura anterior (sem teleporte).
-        # A orientação horizontal do carro permanece em rotacao.y.
-        angulo = player.rotacao.y
-        frente_x, frente_z = -math.sin(angulo), -math.cos(angulo)
-        direita_x, direita_z = math.cos(angulo), -math.sin(angulo)
-
-        # Usa a mesma referência vertical do raycast central para evitar
-        # escolher superfícies acima do carro (pontes e objetos do mapa).
-        referencia = player.posicao.y - altura_chassi + 0.15
-
-        def altura_em(dx, dz):
-            hit = colisao_pista.consultar(
-                player.posicao.x + dx,
-                player.posicao.z + dz,
-                referencia
+            # Colisao 3D carro x caixa:
+            # - consulta a altura no destino antes de validar a movimentacao;
+            # - considera X, Y e Z (nao bloqueia caixas em outro nivel);
+            # - testa TODO o trajeto, evitando atravessar uma caixa entre frames.
+            contato_destino = colisao_pista.consultar(
+                player.posicao.x, player.posicao.z,
+                posicao_antes.y - altura_chassi + 0.15
             )
-            return None if hit is None else hit[0]
+            y_destino = (contato_destino[0] + altura_chassi
+                         if contato_destino is not None else posicao_antes.y)
+            destino = (player.posicao.x, y_destino, player.posicao.z)
 
-        altura_frente = altura_em(
-            frente_x * distancia_frente,
-            frente_z * distancia_frente
-        )
-        altura_tras = altura_em(
-            -frente_x * distancia_frente,
-            -frente_z * distancia_frente
-        )
-        altura_direita = altura_em(
-            direita_x * distancia_lateral,
-            direita_z * distancia_lateral
-        )
-        altura_esquerda = altura_em(
-            -direita_x * distancia_lateral,
-            -direita_z * distancia_lateral
-        )
+            for caixa in caixas:
+                # O pivot do OBJ pode estar na base, nao no centro da caixa.
+                centro_caixa = (
+                    caixa.posicao.x,
+                    caixa.posicao.y + CENTRO_LOCAL_CAIXA_Y,
+                    caixa.posicao.z,
+                )
+                if colide_trajeto_3d(
+                    origem=(posicao_antes.x, posicao_antes.y, posicao_antes.z),
+                    destino=destino,
+                    centro_obstaculo=centro_caixa,
+                    raio_horizontal=RAIO_COLISAO_CARRO + RAIO_COLISAO_CAIXA,
+                    raio_vertical=(MEIA_ALTURA_COLISAO_CARRO
+                                   + MEIA_ALTURA_COLISAO_CAIXA),
+                ):
+                    # Bloqueia o movimento, mantendo a posicao anterior.
+                    player.posicao.x = posicao_antes.x
+                    player.posicao.y = posicao_antes.y
+                    player.posicao.z = posicao_antes.z
+                    if ((destino[0] - posicao_antes.x)**2
+                            + (destino[1] - posicao_antes.y)**2
+                            + (destino[2] - posicao_antes.z)**2) > 1e-12:
+                        sistema_vidas.colidiu()
+                    break
 
-        # Angulos locais: X = subir/descer; Z = tombar para os lados.
-        # Se faltarem pontos sob as rodas, retorna gradualmente ao plano.
-        alvo_pitch = 0.0
-        alvo_roll = 0.0
+            if sistema_vidas.teve_colisao() and sistema_vidas.aplicar_dano(tempo_jogo):
+                print(f"Bateu na caixa! Vidas restantes: {sistema_vidas.vida_atual()}")
+                if sistema_vidas.vida_atual() == 0:
+                    gameover = True
+                    print("GAME OVER - Aperte R para reiniciar")
 
-        if altura_frente is not None and altura_tras is not None:
-            alvo_pitch = math.atan2(
-                altura_frente - altura_tras,
-                2.0 * distancia_frente
+            # O carro se move em X/Z no Player; a altura vem da malha real do mapa.
+            contato = colisao_pista.consultar(
+                player.posicao.x, player.posicao.z,
+                player.posicao.y - altura_chassi + 0.15
             )
 
-        if altura_direita is not None and altura_esquerda is not None:
-            alvo_roll = math.atan2(
-                altura_direita - altura_esquerda,
-                2.0 * distancia_lateral
+            if contato is not None:
+                altura_pista, normal_pista = contato
+                player.posicao.y = altura_pista + altura_chassi
+
+            # Se não há superfície, mantém a altura anterior (sem teleporte).
+            # A orientação horizontal do carro permanece em rotacao.y.
+            angulo = player.rotacao.y
+            frente_x, frente_z = -math.sin(angulo), -math.cos(angulo)
+            direita_x, direita_z = math.cos(angulo), -math.sin(angulo)
+
+            # Usa a mesma referência vertical do raycast central para evitar
+            # escolher superfícies acima do carro (pontes e objetos do mapa).
+            referencia = player.posicao.y - altura_chassi + 0.15
+
+            def altura_em(dx, dz):
+                hit = colisao_pista.consultar(
+                    player.posicao.x + dx,
+                    player.posicao.z + dz,
+                    referencia
+                )
+                return None if hit is None else hit[0]
+
+            altura_frente = altura_em(
+                frente_x * distancia_frente,
+                frente_z * distancia_frente
+            )
+            altura_tras = altura_em(
+                -frente_x * distancia_frente,
+                -frente_z * distancia_frente
+            )
+            altura_direita = altura_em(
+                direita_x * distancia_lateral,
+                direita_z * distancia_lateral
+            )
+            altura_esquerda = altura_em(
+                -direita_x * distancia_lateral,
+                -direita_z * distancia_lateral
             )
 
-        alvo_pitch = max(-inclinacao_maxima, min(inclinacao_maxima, alvo_pitch))
-        alvo_roll = max(-inclinacao_maxima, min(inclinacao_maxima, alvo_roll))
+            # Angulos locais: X = subir/descer; Z = tombar para os lados.
+            # Se faltarem pontos sob as rodas, retorna gradualmente ao plano.
+            alvo_pitch = 0.0
+            alvo_roll = 0.0
 
-        fator = 1.0 - math.exp(-velocidade_suavizacao * dt)
-        player.rotacao.x += (alvo_pitch - player.rotacao.x) * fator
-        player.rotacao.z += (alvo_roll - player.rotacao.z) * fator
+            if altura_frente is not None and altura_tras is not None:
+                alvo_pitch = math.atan2(
+                    altura_frente - altura_tras,
+                    2.0 * distancia_frente
+                )
 
-        player.atualizar(dt)
+            if altura_direita is not None and altura_esquerda is not None:
+                alvo_roll = math.atan2(
+                    altura_direita - altura_esquerda,
+                    2.0 * distancia_lateral
+                )
 
-        # Todas as estrelas giram e flutuam independentemente do FPS.
-        tempo_estrela += dt
-        for i, estrela in enumerate(estrelas):
-            estrela.rotacao += velocidade_giro_estrela * dt
-            fase = tempo_estrela * frequencia_flutuacao + i * 0.5
-            estrela.posicao.y = estrela.base_y + amplitude_flutuacao * math.sin(fase)
+            alvo_pitch = max(-inclinacao_maxima, min(inclinacao_maxima, alvo_pitch))
+            alvo_roll = max(-inclinacao_maxima, min(inclinacao_maxima, alvo_roll))
 
-        # CAMERA
-        camera.seguir(player, dt, esquerda, direita, movimentando)
+            fator = 1.0 - math.exp(-velocidade_suavizacao * dt)
+            player.rotacao.x += (alvo_pitch - player.rotacao.x) * fator
+            player.rotacao.z += (alvo_roll - player.rotacao.z) * fator
+
+            player.atualizar(dt)
+
+            # Todas as estrelas giram e flutuam independentemente do FPS.
+            tempo_estrela += dt
+            for i, estrela in enumerate(estrelas):
+                estrela.rotacao += velocidade_giro_estrela * dt
+                fase = tempo_estrela * frequencia_flutuacao + i * 0.5
+                estrela.posicao.y = estrela.base_y + amplitude_flutuacao * math.sin(fase)
+
+            # CAMERA
+            camera.seguir(player, dt, esquerda, direita, movimentando)
 
         visao = camera.visao()
         projecao = camera.projecao()
@@ -543,12 +604,23 @@ def main():
             quadros = 0
             marco_fps = agora
 
-        # HUD 2D em pixels, por cima da cena 3D, no canto superior esquerdo.
+        # UI: mesma escolha de telas do Trabalho 03, com o Sprite2D comum.
         largura_tela, altura_tela = glfw.get_framebuffer_size(janela)
         sprites_2d.iniciar()
-        hud_vidas.desenhar(sistema_vidas.vida_atual(), largura_tela, altura_tela)
-        # Futuro: tela_inicio.desenhar(largura_tela, altura_tela)
-        # Futuro: tela_pausa.desenhar(largura_tela, altura_tela)
+        if inicio:
+            tela_inicio.mudar_posicao(0, 0)
+            tela_inicio.mudar_tamanho(largura_tela, altura_tela)
+            tela_inicio.desenhar(largura_tela, altura_tela)
+        elif pause:
+            tela_pausa.mudar_posicao(0, 0)
+            tela_pausa.mudar_tamanho(largura_tela, altura_tela)
+            tela_pausa.desenhar(largura_tela, altura_tela)
+        elif gameover:
+            tela_gameover.mudar_posicao(0, 0)
+            tela_gameover.mudar_tamanho(largura_tela, altura_tela)
+            tela_gameover.desenhar(largura_tela, altura_tela)
+        else:
+            hud_vidas.desenhar(sistema_vidas.vida_atual(), largura_tela, altura_tela)
         sprites_2d.finalizar()
 
         glfw.swap_buffers(janela)
