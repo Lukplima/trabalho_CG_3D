@@ -20,7 +20,7 @@ import numpy as np
 from camera import Camera
 from malha import Malha
 from colisao_pista import ColisaoPista
-from colisao_obstaculos import colide_trajeto_3d
+from colisao_obstaculos import colide_carro_caixa
 from gerador_objetos import GeradorObjetos
 from material import Material, Luz
 from codigos3D.utils3d import *
@@ -194,9 +194,8 @@ def main():
     SEMENTE = None  # Inteiro para reproduzir as mesmas posicoes.
     RAIO_ESTRELA = 0.30
     RAIO_CAIXA = 0.42  # Usado somente para distribuir as caixas na pista.
-    RAIO_COLISAO_CAIXA = 0.23  # Área real de bloqueio menor.
-    RAIO_COLISAO_CARRO = 0.18  # Raio horizontal do carro (colisao).
-    MEIA_ALTURA_COLISAO_CARRO = 0.16  # Metade da altura usada na colisao 3D.
+    # A colisao da caixa sera calculada pelas suas dimensoes reais.
+    RAIO_COLISAO_CAIXA = None
     FOLGA_ENTRE_TIPOS = 0.50
 
     # As reservas impedem estrelas e caixas de nascerem no mesmo lugar.
@@ -244,6 +243,7 @@ def main():
     desenho_caixa = ObjetoOBJ(ctx, programa_textura, MODELOS / "caixa.obj")
     desenho_caixa.mudar_escala((escala_caixa,) * 3)
     MEIA_ALTURA_COLISAO_CAIXA = float(dimensoes_caixa[1]) * escala_caixa / 2.0
+    RAIO_COLISAO_CAIXA = 0.90 * max(float(dimensoes_caixa[0]), float(dimensoes_caixa[2])) * escala_caixa / 2.0
     CENTRO_LOCAL_CAIXA_Y = (float(malha_caixa.vertices[:, 1].min())
                             + float(malha_caixa.vertices[:, 1].max())) * escala_caixa / 2.0
 
@@ -279,9 +279,28 @@ def main():
     player.mudar_escala((0.5, 0.5, 0.5))
     player.mudar_posicao((0.0, 0.4, 0.0))
 
-    altura_chassi = 0.21  # Mantem o ajuste anterior das rodas
-    distancia_frente = 0.38  # Pontos de amostragem no sentido do carro
-    distancia_lateral = 0.26  # Pontos de amostragem entre os lados
+    # Dimensoes do carro NOVO, apos a normalizacao feita por Modelo3D.
+    vertices_carro = player.modelo_off.vertices
+    min_carro = vertices_carro.min(axis=0)
+    max_carro = vertices_carro.max(axis=0)
+    escala_player = np.array([player.escala.x, player.escala.y, player.escala.z])
+    dimensoes_carro = (max_carro - min_carro) * escala_player
+    centro_local_y = float((min_carro[1] + max_carro[1]) * 0.5 * escala_player[1])
+
+    # Margem pequena evita colisoes antes do contato visual.
+    MEIA_LARGURA_COLISAO_CARRO = 0.95 * float(dimensoes_carro[0]) / 2.0
+    MEIO_COMPRIMENTO_COLISAO_CARRO = 0.95 * float(dimensoes_carro[2]) / 2.0
+    MEIA_ALTURA_COLISAO_CARRO = 0.95 * float(dimensoes_carro[1]) / 2.0
+
+    # O fundo do modelo (em vez do centro antigo) encosta no asfalto.
+    FOLGA_SOLO = 0.0035
+    altura_chassi = FOLGA_SOLO - float(min_carro[1] * escala_player[1])
+
+    # Amostras de inclinacao proximas das extremidades do carro novo.
+    distancia_frente = max(0.05, 0.78 * float(dimensoes_carro[2]) / 2.0)
+    distancia_lateral = max(0.05, 0.78 * float(dimensoes_carro[0]) / 2.0)
+    print(f"Carro novo: dimensoes (X/Y/Z) = {tuple(round(float(d), 3) for d in dimensoes_carro)}")
+    print(f"Altura sobre pista = {altura_chassi:.3f}; colisao retangular orientada")
     inclinacao_maxima = glm.radians(25.0)
     velocidade_suavizacao = 7.0
 
@@ -413,13 +432,16 @@ def main():
                     caixa.posicao.y + CENTRO_LOCAL_CAIXA_Y,
                     caixa.posicao.z,
                 )
-                if colide_trajeto_3d(
-                    origem=(posicao_antes.x, posicao_antes.y, posicao_antes.z),
-                    destino=destino,
-                    centro_obstaculo=centro_caixa,
-                    raio_horizontal=RAIO_COLISAO_CARRO + RAIO_COLISAO_CAIXA,
-                    raio_vertical=(MEIA_ALTURA_COLISAO_CARRO
-                                   + MEIA_ALTURA_COLISAO_CAIXA),
+                if colide_carro_caixa(
+                    origem=(posicao_antes.x, posicao_antes.y + centro_local_y, posicao_antes.z),
+                    destino=(destino[0], destino[1] + centro_local_y, destino[2]),
+                    centro_caixa=centro_caixa,
+                    angulo_carro=float(player.rotacao.y),
+                    meia_largura=MEIA_LARGURA_COLISAO_CARRO,
+                    meia_altura=MEIA_ALTURA_COLISAO_CARRO,
+                    meio_comprimento=MEIO_COMPRIMENTO_COLISAO_CARRO,
+                    raio_caixa=RAIO_COLISAO_CAIXA,
+                    meia_altura_caixa=MEIA_ALTURA_COLISAO_CAIXA,
                 ):
                     # Bloqueia o movimento, mantendo a posicao anterior.
                     player.posicao.x = posicao_antes.x
