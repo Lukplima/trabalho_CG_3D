@@ -14,6 +14,9 @@ from colisao_pista import ColisaoPista
 from gerador_objetos import GeradorObjetos
 from material import Material, Luz
 from codigos3D.utils3d import *
+from hud_vidas import HUDVidas
+from sprite_2d import Renderizador2D
+from sistema_vidas import SistemaVidas
 
 PASTA = Path(__file__).parent
 SHADERS = PASTA / "shaders"
@@ -118,6 +121,13 @@ def main():
     ctx.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
     ctx.front_face = "ccw"
 
+    # Renderer unico de PNGs 2D: coracoes, menus, pausa, pontuacao, etc.
+    sprites_2d = Renderizador2D(ctx, SHADERS)
+    hud_vidas = HUDVidas(sprites_2d, PASTA / "imagens" / "heart_32x32.png",
+                        PASTA / "imagens" / "heart_empty_32x32.png", total=3)
+    # Mesmos metodos do CarroPlayer do jogo 2D, adaptados ao carro 3D.
+    sistema_vidas = SistemaVidas(total=3, intervalo_dano=1.2)
+
     malha = Malha(PASTA / "mapa.off")
     programa = carregar_programa(ctx)
     programa_textura = carregar_programa_textura(ctx)
@@ -153,15 +163,16 @@ def main():
 
     # Configure aqui os tipos de objeto sem duplicar o algoritmo do sorteio.
     NUM_ESTRELAS_ALEATORIAS = 7
-    NUM_CAIXAS = 10
+    NUM_CAIXAS = 30
     DISTANCIA_ESTRELAS = 3.5
-    DISTANCIA_CAIXAS = 4.0
     MARGEM_BORDA = 0.75  # Estrelas
-    MARGEM_BORDA_CAIXAS = 0.20  # Caixas: o raio de 0.65 ja conta como folga
+    DISTANCIA_CAIXAS = 1.8
+    MARGEM_BORDA_CAIXAS = 0.10
     SEMENTE = None  # Inteiro para reproduzir as mesmas posicoes.
     RAIO_ESTRELA = 0.30
-    RAIO_CAIXA = 0.65
-    RAIO_CARRO = 0.50
+    RAIO_CAIXA = 0.42  # Usado somente para distribuir as caixas na pista.
+    RAIO_COLISAO_CAIXA = 0.23  # Área real de bloqueio menor.
+    RAIO_COLISAO_CARRO = 0.18  # Área real de bloqueio menor.
     FOLGA_ENTRE_TIPOS = 0.50
 
     # As reservas impedem estrelas e caixas de nascerem no mesmo lugar.
@@ -238,8 +249,8 @@ def main():
     amplitude_flutuacao = 0.12
     frequencia_flutuacao = 2.0
 
-    player.mudar_escala((1.0, 1.0, 1.0))
-    player.mudar_posicao((17.0, -0.2, -5.0))
+    player.mudar_escala((0.5, 0.5, 0.5))
+    player.mudar_posicao((0.0, 0.4, 0.0))
 
     altura_chassi = 0.21  # Mantem o ajuste anterior das rodas
     distancia_frente = 0.38  # Pontos de amostragem no sentido do carro
@@ -262,6 +273,16 @@ def main():
         elif key == glfw.KEY_V:
             vsync = not vsync
             glfw.swap_interval(1 if vsync else 0)
+        elif key == glfw.KEY_R and sistema_vidas.vida_atual() == 0:
+            sistema_vidas.reinicia_vidas()
+            player.posicao.x = 0.0
+            player.posicao.z = 0.0
+            contato_reinicio = colisao_pista.consultar(0.0, 0.0)
+            if contato_reinicio is not None:
+                player.posicao.y = contato_reinicio[0] + altura_chassi
+            player.rotacao.x = 0.0
+            player.rotacao.z = 0.0
+            print("Partida reiniciada: 3 vidas")
 
     def botao_mouse(window, button, action, mods):
         nonlocal arrastando, ultimo_cursor
@@ -315,7 +336,11 @@ def main():
 
         #pos antes do jog pra assim saber pra onde ir caso tenha colisão e a movimentação dele
         posicao_antes = glm.vec3(player.posicao)
-        movimentando = player.movimentacao(frente, tras, esquerda, direita, dt)
+        sistema_vidas.reinicia_colisao()
+        if sistema_vidas.vida_atual() > 0:
+            movimentando = player.movimentacao(frente, tras, esquerda, direita, dt)
+        else:
+            movimentando = False  # Sem vidas: carro parado
 
         # Colisao basica jogador x caixa: nao atravessar obstaculos.
 
@@ -325,20 +350,31 @@ def main():
         dx, dz = px1 - px0, pz1 - pz0
         comprimento2 = dx * dx + dz * dz
 
-        for caixa in caixas: #roda todas as caixas pra ve se colidiu com aula
+        for caixa in caixas: #roda todas as caixas pra ve se colidiu com alguma
             if comprimento2 > 1e-12: #se andou
                 t = max(0.0, min(1.0,
                     ((caixa.posicao.x - px0) * dx + (caixa.posicao.z - pz0) * dz)
-                    / comprimento2)) #olha a pos q chegou mais perto da caixa
+                    / comprimento2)) #a pos mais perto foi em 60% do caminho
             else:
                 t = 0.0
+            #aq é a posicao de fato
             perto_x = px0 + t * dx
             perto_z = pz0 + t * dz
-            limite = RAIO_CARRO + caixa.raio
+            limite = RAIO_COLISAO_CARRO + RAIO_COLISAO_CAIXA
             if (perto_x - caixa.posicao.x)**2 + (perto_z - caixa.posicao.z)**2 < limite**2: #se passou de r1+r2 q é limite ele  volta pra pos ant
                 player.posicao.x = posicao_antes.x
                 player.posicao.z = posicao_antes.z
+
+                # Igual ao codigo 2D: primeiro registra a colisao,
+                # depois verifica se pode descontar uma vida.
+                if comprimento2 > 1e-12:
+                    sistema_vidas.colidiu()
                 break
+
+        if sistema_vidas.teve_colisao() and sistema_vidas.aplicar_dano(agora):
+            print(f"Bateu na caixa! Vidas restantes: {sistema_vidas.vida_atual()}")
+            if sistema_vidas.vida_atual() == 0:
+                print("GAME OVER - Aperte R para reiniciar")
 
         # O carro se move em X/Z no Player; a altura vem da malha real do mapa.
         contato = colisao_pista.consultar(
@@ -507,9 +543,18 @@ def main():
             quadros = 0
             marco_fps = agora
 
+        # HUD 2D em pixels, por cima da cena 3D, no canto superior esquerdo.
+        largura_tela, altura_tela = glfw.get_framebuffer_size(janela)
+        sprites_2d.iniciar()
+        hud_vidas.desenhar(sistema_vidas.vida_atual(), largura_tela, altura_tela)
+        # Futuro: tela_inicio.desenhar(largura_tela, altura_tela)
+        # Futuro: tela_pausa.desenhar(largura_tela, altura_tela)
+        sprites_2d.finalizar()
+
         glfw.swap_buffers(janela)
         glfw.poll_events()
 
+    sprites_2d.liberar()
     desenho_estrela.liberar()
     desenho_caixa.liberar()
     player.liberar()
