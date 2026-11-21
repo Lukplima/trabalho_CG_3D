@@ -38,34 +38,43 @@ class Camera:
     #Visão do Player
     def seguir(self, player, dt, esquerda, direita, movimentando):
         if self.visao_geral:
-            # O circuito tem ~80 unidades: camera deve mostrar a pista inteira.
-            self.alvo = glm.vec3(0.0, 0.0, 0.0)
+            self.alvo = glm.vec3(player.posicao)
+    
+            alvo_azimute = player.rotacao.y
+    
+            import math
+    
+            diferenca = math.atan2(
+                math.sin(alvo_azimute - self.azimute),
+                math.cos(alvo_azimute - self.azimute)
+            )
+    
+            self.azimute += diferenca * min(1.0, 5.0 * dt)
             return
-        
+    
         # ACOMPANHA A POSIÇÃO DO PLAYER
         self.alvo = glm.vec3(player.posicao)
-
+    
         if movimentando:
             # Acompanha a orientação do carro
             alvo_azimute = player.rotacao.y
-
+    
         else:
             # Gira a câmera mesmo com o carro parado
             if esquerda:
                 self.azimute += self.velocidade_giro * dt
-
+    
             if direita:
                 self.azimute -= self.velocidade_giro * dt
-
+    
             return
-
+    
         # SUAVIZAÇÃO DA ROTAÇÃO
         import math
-
+    
         diferenca = math.atan2(
             math.sin(alvo_azimute - self.azimute),
             math.cos(alvo_azimute - self.azimute)
         )
-
+    
         self.azimute += diferenca * min(1.0, 5.0 * dt)
-

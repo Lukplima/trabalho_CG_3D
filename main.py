@@ -399,17 +399,16 @@ def main():
         elif key == glfw.KEY_C and not (inicio or pause or gameover or vitoria):
             camera.visao_geral = not camera.visao_geral
             if camera.visao_geral:
-                camera.distancia = 115.0
-                camera.elevacao = math.radians(68.0)
-                camera.azimute = 0.0
                 camera.alvo = glm.vec3(0.0, 0.0, 0.0)
-                print("Camera: visao geral")
+                camera.distancia = 10.0
+                camera.azimute = 0.0
+                camera.elevacao = glm.radians(65.0)
+                print("Visao geral ativada")
             else:
                 camera.distancia = 5.0
+                camera.azimute = glm.radians(-90.0)
                 camera.elevacao = 0.25
-                camera.azimute = float(player.rotacao.y)
-                camera.alvo = glm.vec3(player.posicao)
-                print("Camera: seguindo o carro")
+                print("Camera do jogador ativada")
 
     def botao_mouse(window, button, action, mods):
         nonlocal arrastando, ultimo_cursor
