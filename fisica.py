@@ -73,7 +73,7 @@ class ColisaoPista:
                     (int(chave_cel[0]), int(chave_cel[1])): ids[offsets[i]:offsets[i+1]]
                     for i, chave_cel in enumerate(keys)
                 }
-            print(f"Cache de colisao: {arquivo.name} ({len(self.celulas)} celulas)")
+            print(f"Cache de colisao carregado ({len(self.celulas)} celulas)")
             return True
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             return False
