@@ -26,6 +26,7 @@ from jogo import GeradorObjetos, ControleCorrida, SistemaVidas
 from codigos3D.utils3d import Player, Mapa, ObjetoOBJ, MODELOS
 from interface import HUDJogo, Renderizador2D
 from skybox import Skybox
+from orquestrador_round import IniciaRound
 
 PASTA = Path(__file__).parent
 SHADERS = PASTA / "shaders"
@@ -125,6 +126,8 @@ def main():
     tela_pausa = sprites_2d.criar_sprite(pasta_imagens / "tela_paused.png")
     tela_gameover = sprites_2d.criar_sprite(pasta_imagens / "tela_gameover.png")
     tela_vitoria = sprites_2d.criar_sprite(pasta_imagens / "youwin.png")
+    #Inicialização de round
+    ini_round = IniciaRound(renderizador=sprites_2d, janela=janela)
 
     # Estados mantidos do Trabalho 03: inicio, pausa e gameover.
     inicio = True
@@ -361,10 +364,13 @@ def main():
         sistema_vidas.reinicia_vidas()
         inicio, pause, gameover, vitoria = False, False, False, False
         corrida.reiniciar()
+        ini_round.reinicia_round()
+        ini_round.inicia_round()
         tempo_jogo = 0.0
         tempo_estrela = 0.0
         pontuacao = 0
         player.mudar_posicao(POSICAO_INICIAL)
+        player.velocidade = 0.0
         sortear_estrelas_nova_volta()
         player.mudar_rotacao((0.0, -math.pi / 2.0, 0.0))
         player.velocidade = velocidade_inicial * corrida.velocidade_geral
@@ -389,7 +395,9 @@ def main():
             glfw.swap_interval(1 if vsync else 0)
         elif key == glfw.KEY_SPACE and inicio:
             inicio = False
-        elif key == glfw.KEY_P and not inicio and not gameover and not vitoria:
+            ini_round.reinicia_round()
+            ini_round.inicia_round()
+        elif key == glfw.KEY_P and not inicio and not gameover and not vitoria and not ini_round.ativo:
             pause = not pause
             # Cancela arrasto para nao mover a camera nem dar saltos na volta.
             arrastando = False
@@ -460,6 +468,7 @@ def main():
         agora = glfw.get_time()
         dt = min(agora - instante_anterior, 0.05)
         instante_anterior = agora
+        ini_round.atualizar(dt)
 
         # No Trabalho 03, so se atualiza o jogo no estado "jogando".
         # Ao pausar, dt continua sendo medido, mas nao move nenhum objeto.
@@ -467,11 +476,18 @@ def main():
             multiplicador = corrida.atualizar_tempo(dt)
             tempo_jogo = corrida.tempo_jogo
             player.velocidade = velocidade_inicial * multiplicador
-            # CONTROLES DO JOGADOR
-            frente = glfw.get_key(janela, glfw.KEY_UP) == glfw.PRESS
-            tras = glfw.get_key(janela, glfw.KEY_DOWN) == glfw.PRESS
-            esquerda = glfw.get_key(janela, glfw.KEY_LEFT) == glfw.PRESS
-            direita = glfw.get_key(janela, glfw.KEY_RIGHT) == glfw.PRESS
+            if not ini_round.ativo:
+                # CONTROLES DO JOGADOR
+                frente = glfw.get_key(janela, glfw.KEY_UP) == glfw.PRESS
+                tras = glfw.get_key(janela, glfw.KEY_DOWN) == glfw.PRESS
+                esquerda = glfw.get_key(janela, glfw.KEY_LEFT) == glfw.PRESS
+                direita = glfw.get_key(janela, glfw.KEY_RIGHT) == glfw.PRESS
+            else:
+                # Mantem o carro na posicao inicial durante a animacao do round.
+                player.mudar_posicao(POSICAO_INICIAL)
+                player.mudar_rotacao((0.0, -math.pi / 2.0, 0.0))
+
+                frente, tras, esquerda, direita = False, False, False, False
 
             #pos antes do jog pra assim saber pra onde ir caso tenha colisão e a movimentação dele
             sistema_vidas.reinicia_colisao()
@@ -643,6 +659,8 @@ def main():
                     # O HUD recomeça vazio junto com as tres estrelas novas.
                     pontuacao = 0
                     sortear_estrelas_nova_volta()
+                    ini_round.atualiza_round()
+                    ini_round.inicia_round()
                     print("Nova volta: estrelas renasceram e o HUD voltou para 0/3!")
 
             # Todas as estrelas giram e flutuam independentemente do FPS.
@@ -758,6 +776,7 @@ def main():
             tela_gameover.desenhar(largura_tela, altura_tela)
         else:
             hud_jogo.desenhar(sistema_vidas.vida_atual(), pontuacao, largura_tela, altura_tela)
+        ini_round.desenhar()
         sprites_2d.finalizar()
 
         glfw.swap_buffers(janela)
