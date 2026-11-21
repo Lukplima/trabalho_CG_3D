@@ -11,6 +11,7 @@
 
 import sys
 import math
+import time
 from pathlib import Path
 
 import glfw
@@ -160,8 +161,6 @@ def main():
 
     arrastando = False
     ultimo_cursor = None
-
-    import time
 
     # OBJETOS
     inicio_carregamento = time.perf_counter()
