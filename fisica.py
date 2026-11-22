@@ -99,7 +99,7 @@ class ColisaoPista:
         chave = (int(np.floor(x / self.tamanho_celula)),
                  int(np.floor(z / self.tamanho_celula)))
         ids = self.celulas.get(chave)
-        if not ids:
+        if ids is None or len(ids) == 0:
             return None
 
         tri = self.vertices[self.faces[ids]]
